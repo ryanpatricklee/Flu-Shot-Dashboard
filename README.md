@@ -29,7 +29,7 @@ The project aims to track whenever a patient either did not get their lab work d
 - Months where patient was alive
 
 ### Exclusion Criteria:
-- Months where patient received kidney transplant (procedure code = 55.69)
+- Months where patient received kidney transplant
 
 ## Content
 **SQL Code**
