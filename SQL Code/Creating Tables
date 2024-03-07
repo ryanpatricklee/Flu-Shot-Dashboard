@@ -1,3 +1,5 @@
+-- Create tables to load the data into PostgreSQL
+
 CREATE TABLE conditions
         (
         START DATE,
