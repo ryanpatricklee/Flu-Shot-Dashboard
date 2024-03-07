@@ -33,6 +33,8 @@ The project aims to track whenever a patient either did not get their lab work d
 
 ## Content
 **SQL Code**
+- [Create Tables](https://github.com/ryanpatricklee/ESRD-Concept-Dashboard/blob/main/SQL%20Code/Creating%20Tables)
+- [Data Extract](https://github.com/ryanpatricklee/ESRD-Concept-Dashboard/blob/main/SQL%20Code/Data%20Extract)
 
 ## Data
 All data was synthetically generated (i.e. fake) and was generated from [Synthea](https://synthetichealth.github.io/synthea/)
