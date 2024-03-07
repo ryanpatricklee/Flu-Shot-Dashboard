@@ -35,3 +35,4 @@ The project aims to track whenever a patient either did not get their lab work d
 **SQL Code**
 
 ## Data
+All data was synthetically generated (i.e. fake) and was generated from [Synthea](https://synthetichealth.github.io/synthea/)
