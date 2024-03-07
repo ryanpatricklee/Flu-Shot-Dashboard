@@ -1,0 +1,207 @@
+/*----------------------------------------------------------------------------------------------
+OBJECTIVE:
+Build a data extract that looks at monthly census of ESRD patients in the year 2022 that
+analyzes their lab values on a monthly basis for
+
+- Calcium
+- Sodium
+- Albumin
+- Blood Urea Nitrogen (BUN)
+
+We want to be able to track whenever a patient either did not get their lab work done for a 
+given month, or failed to meet a target. We also want to see what percentage of our cohort 
+met the organizational goals, and if we are trending in the right direction with these lab 
+values.
+
+This will allow us to reach out to patients struggling to meet their lab value 
+targets, and possibly provide them with resources to ensure they are getting adequate 
+dialysis treatment (transport, education, etc.)
+----------------------------------------------------------------------------------------------*/
+
+
+
+------------------------------------------------------------------------------------------------
+-- The active_pats cte filters the encounters table for patients who had an encounter 
+-- recently, particularly during the year 2021 and 2022.
+------------------------------------------------------------------------------------------------
+
+WITH active_pats AS
+	(
+		SELECT DISTINCT patient
+		FROM encounters
+		WHERE start BETWEEN '2021-01-01 00:00:00' AND '2022-12-31 23:59:59'
+	),
+
+------------------------------------------------------------------------------------------------
+-- The kidney_transplant cte filters for patients in the procedures table who had a
+-- kidney transplant.
+------------------------------------------------------------------------------------------------
+
+	 kidney_transplant AS
+	(
+		SELECT *
+		FROM procedures
+		WHERE code = '55.69'
+	),
+
+------------------------------------------------------------------------------------------------
+-- The esrd cte joins the conditions table, patients table, active_pats cte, and
+-- kidney_transplant table. Then it extracts the relevant columsn for analysis, and
+-- filters for the relevant esrd patients in which we are interested in analyzing.
+------------------------------------------------------------------------------------------------
+
+	 esrd AS
+	(
+		SELECT pat.id AS pat_id
+			  ,CONCAT(pat.last,', ',pat.first) AS name
+			  ,cond.start AS esrd_begin
+			  ,LEAST(cond.stop,pat.deathdate,kt.start,'2099-01-01') AS earliest_esrd_end
+			  ,cond.stop AS esrd_end
+			  ,kt.start AS kidney_transplant_date
+			  ,pat.deathdate
+			  ,pat.race
+			  ,pat.birthdate
+			  ,EXTRACT(YEAR FROM AGE('2022-12-31',pat.birthdate)) AS age
+			  ,pat.city
+			  ,pat.state
+			  ,pat.county
+		FROM conditions AS cond
+		LEFT JOIN kidney_transplant AS kt
+			   ON cond.patient = kt.patient
+		JOIN patients AS pat
+		  ON cond.patient = pat.id
+		JOIN active_pats AS ap
+		  ON cond.patient = ap.patient
+		WHERE cond.code = '585.6'
+		  AND (  cond.start BETWEEN '2022-01-01 00:00:00' AND '2022-12-31 23:59:59'
+			  OR cond.stop BETWEEN '2022-01-01 00:00:00' AND '2022-12-31 23:59:59'
+			  OR (cond.start < '2022-01-01 00:00:00' AND cond.stop IS NULL)
+			  OR (cond.start < '2022-01-01 00:00:00' AND cond.stop >= '2022-01-01 00:00:00')
+			  )
+		  AND (pat.deathdate IS NULL OR pat.deathdate >= '2022-01-01 00:00:00')
+		  AND (kt.start IS NULL OR kt.start >= '2022-01-01 00:00:00')
+	),
+
+------------------------------------------------------------------------------------------------
+-- The observe_date cte constructs a list of 12 rows containing truncated months which will
+-- be used later to join with the esrd cte to form a patient-month combination table
+------------------------------------------------------------------------------------------------
+
+	 observations_date AS
+	(
+		SELECT '2022-01-01'::DATE AS month
+		UNION
+		SELECT '2022-02-01'::DATE AS month
+		UNION
+		SELECT '2022-03-01'::DATE AS month
+		UNION
+		SELECT '2022-04-01'::DATE AS month
+		UNION
+		SELECT '2022-05-01'::DATE AS month
+		UNION
+		SELECT '2022-06-01'::DATE AS month
+		UNION
+		SELECT '2022-07-01'::DATE AS month
+		UNION
+		SELECT '2022-08-01'::DATE AS month
+		UNION
+		SELECT '2022-09-01'::DATE AS month
+		UNION
+		SELECT '2022-10-01'::DATE AS month
+		UNION
+		SELECT '2022-11-01'::DATE AS month
+		UNION
+		SELECT '2022-12-01'::DATE AS month
+	),
+
+------------------------------------------------------------------------------------------------
+-- The prep cte joins the esrd cte with the observe_date cte so that the granularity of
+-- the table is a patient-months combination
+------------------------------------------------------------------------------------------------
+
+	 prep AS
+	(
+		SELECT od.month
+			  ,esrd.pat_id
+			  ,esrd.name
+			  ,esrd.esrd_begin
+			  ,esrd.earliest_esrd_end
+			  ,esrd.esrd_end
+			  ,esrd.kidney_transplant_date
+			  ,esrd.deathdate
+			  ,esrd.race
+			  ,esrd.birthdate
+			  ,esrd.age
+			  ,esrd.city
+			  ,esrd.state
+			  ,esrd.county
+		FROM observations_date AS od
+		JOIN esrd
+		  ON od.month BETWEEN esrd.esrd_begin AND esrd.earliest_esrd_end
+	),
+
+------------------------------------------------------------------------------------------------
+-- The lab cte tracks every time every active esrd patient got their calcium, sodium, 
+-- albumin, and bun levels recorded for each month in the year 2022
+------------------------------------------------------------------------------------------------
+
+	 labs AS
+	(
+		SELECT patient
+			  ,date AS lab_date
+			  ,DATE_TRUNC('MONTH', date) AS month
+			  ,code
+			  ,description
+			  ,value::FLOAT
+			  ,ROW_NUMBER() OVER (PARTITION BY patient,code,DATE_TRUNC('MONTH', date) ORDER BY date) AS nth_lab
+		FROM observations
+		WHERE code IN ('49765-1','2947-0','1751-7','6299-2')
+		  AND date BETWEEN '2022-01-01 00:00:00' AND '2022-12-31 23:59:59'
+	)
+
+------------------------------------------------------------------------------------------------
+-- The query below joins the prep cte and labs cte and gathers for every active esrd patient
+-- the first calcium, first sodium, first albumin, and first bun level lab values for each
+-- month in the year 2022
+------------------------------------------------------------------------------------------------
+
+SELECT DISTINCT
+	   prep.month
+	  ,prep.pat_id
+	  ,prep.name
+	  ,prep.esrd_begin
+	  ,prep.earliest_esrd_end
+	  ,prep.esrd_end
+	  ,prep.kidney_transplant_date
+	  ,prep.deathdate
+	  ,prep.race
+	  ,prep.birthdate
+	  ,prep.age
+	  ,prep.city
+	  ,prep.state
+	  ,prep.county
+	  ,ca.value AS calcium_value
+	  ,na.value AS sodium_value
+	  ,alb.value AS albumin_value
+	  ,bun.value AS bun_value
+FROM prep
+LEFT JOIN labs AS ca
+	   ON prep.pat_id = ca.patient
+	  AND prep.month = ca.month
+	  AND ca.nth_lab = 1
+	  AND ca.code = '49765-1' -- calcium
+LEFT JOIN labs AS na
+	   ON prep.pat_id = na.patient
+	  AND prep.month = na.month
+	  AND na.nth_lab = 1
+	  AND na.code = '2947-0' -- sodium
+LEFT JOIN labs AS alb
+	   ON prep.pat_id = alb.patient
+	  AND prep.month = alb.month
+	  AND alb.nth_lab = 1
+	  AND alb.code = '1751-7' -- albumin
+LEFT JOIN labs AS bun
+	   ON prep.pat_id = bun.patient
+	  AND prep.month = bun.month
+	  AND bun.nth_lab = 1
+	  AND bun.code = '6299-2' -- blood urea nitrogen
